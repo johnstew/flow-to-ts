@@ -4,6 +4,7 @@ const glob = require("glob");
 
 const convert = require("./convert.js");
 const detectJsx = require("./detect-jsx.js");
+const detectEmptyFlowFile = require("./detect-flow.js");
 const version = require("../package.json").version;
 
 const cli = argv => {
@@ -46,7 +47,8 @@ const cli = argv => {
     )
     .option("--print-width [width]", "line width (depends on --prettier)", 80)
     .option("--write", "write output to disk instead of STDOUT")
-    .option("--delete-source", "delete the source file");
+    .option("--delete-source", "delete the source file")
+    .option("--stats", "show stats");
 
   program.parse(argv);
 
@@ -64,7 +66,8 @@ const cli = argv => {
     trailingComma: program.trailingComma,
     bracketSpacing: Boolean(program.bracketSpacing),
     arrowParens: program.arrowParens,
-    printWidth: parseInt(program.printWidth)
+    printWidth: parseInt(program.printWidth),
+    stats: Boolean(program.stats)
   };
 
   const files = new Set();
@@ -74,9 +77,28 @@ const cli = argv => {
     }
   }
 
+  const stats = {
+    emptyFlowFiles: {
+      title: "Empty @flow files",
+      description:
+        "Number of @flow files containing @flow comment but no type information",
+      value: 0,
+      files: []
+    }
+  };
+
   for (const file of files) {
     const inFile = file;
     const inCode = fs.readFileSync(inFile, "utf-8");
+    // Stats
+    const isEmptyFlowFile = detectEmptyFlowFile(inCode);
+
+    if (isEmptyFlowFile) {
+      stats.emptyFlowFiles.value += 1;
+      stats.emptyFlowFiles.files.push(inFile);
+    }
+
+    if (program.stats) continue;
 
     try {
       const outCode = convert(inCode, options);
@@ -96,6 +118,10 @@ const cli = argv => {
       console.error(`error processing ${inFile}`);
       console.error(e);
     }
+  }
+
+  if (program.stats) {
+    console.log(JSON.stringify(stats, null, 4));
   }
 };
 
