@@ -4,7 +4,7 @@ const glob = require("glob");
 
 const convert = require("./convert.js");
 const detectJsx = require("./detect-jsx.js");
-const detectEmptyFlowFile = require("./detect-flow.js");
+const getStats = require("./stats.js");
 const version = require("../package.json").version;
 
 const cli = argv => {
@@ -77,28 +77,15 @@ const cli = argv => {
     }
   }
 
-  const stats = {
-    emptyFlowFiles: {
-      title: "Empty @flow files",
-      description:
-        "Number of @flow files containing @flow comment but no type information",
-      value: 0,
-      files: []
-    }
-  };
+  if (program.stats) {
+    const stats = getStats(files);
+    console.log(stats);
+    return;
+  }
 
   for (const file of files) {
     const inFile = file;
     const inCode = fs.readFileSync(inFile, "utf-8");
-    // Stats
-    const isEmptyFlowFile = detectEmptyFlowFile(inCode);
-
-    if (isEmptyFlowFile) {
-      stats.emptyFlowFiles.value += 1;
-      stats.emptyFlowFiles.files.push(inFile);
-    }
-
-    if (program.stats) continue;
 
     try {
       const outCode = convert(inCode, options);
@@ -118,10 +105,6 @@ const cli = argv => {
       console.error(`error processing ${inFile}`);
       console.error(e);
     }
-  }
-
-  if (program.stats) {
-    console.log(JSON.stringify(stats, null, 4));
   }
 };
 
