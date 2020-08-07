@@ -5,6 +5,7 @@ const glob = require("glob");
 const convert = require("./convert.js");
 const detectJsx = require("./detect-jsx.js");
 const getStats = require("./stats.js");
+const isEmptyFlow = require("./empty-flow.js");
 const version = require("../package.json").version;
 
 const cli = argv => {
@@ -48,6 +49,7 @@ const cli = argv => {
     .option("--print-width [width]", "line width (depends on --prettier)", 80)
     .option("--write", "write output to disk instead of STDOUT")
     .option("--delete-source", "delete the source file")
+    .option("--input", "input files", "**/*.js")
     .option("--stats", "show stats");
 
   program.parse(argv);
@@ -67,7 +69,8 @@ const cli = argv => {
     bracketSpacing: Boolean(program.bracketSpacing),
     arrowParens: program.arrowParens,
     printWidth: parseInt(program.printWidth),
-    stats: Boolean(program.stats)
+    stats: Boolean(program.stats),
+    input: program.input
   };
 
   const files = new Set();
@@ -79,7 +82,8 @@ const cli = argv => {
 
   if (program.stats) {
     const stats = getStats(files);
-    console.log(stats);
+    console.log(stats.stdout.stats);
+    console.log(stats.stdout.buckets);
     return;
   }
 
@@ -106,6 +110,8 @@ const cli = argv => {
       console.error(e);
     }
   }
+
+  console.log("Total number of empty flow files: ", numberOfEmptyFlowFiles);
 };
 
 module.exports = cli;

@@ -1,47 +1,13 @@
 const { parse } = require("@babel/parser");
 const t = require("@babel/types");
-const traverse = require("../babel-traverse/lib/index.js").default;
 const { table } = require("table");
 const fs = require("fs");
 
+const traverse = require("../babel-traverse/lib/index.js").default;
+const { isEmptyFlowFile, hasFlowComment } = require("./empty-flow");
 const { parseOptions } = require("./convert.js");
 
-const isFlowComment = comments => {
-  if (!comments || comments.length === 0) {
-    return false;
-  }
-
-  return comments.some(comment => {
-    const value = comment.value.trim();
-    return value === "@flow" || value.startsWith("$FlowFixMe");
-  });
-};
-
-const statEmptyFlowFile = ({ body, state }) => {
-  let isFlow = false;
-  let hasFlowComment = false;
-
-  for (let i = 0; i < body.length; i++) {
-    const stmt = body[i];
-    isFlow = isFlow || t.isFlow(stmt);
-    hasFlowComment =
-      hasFlowComment || isFlowComment(stmt.leadingComments || []);
-  }
-
-  return hasFlowComment && !isFlow;
-};
-
-const statFlowFile = ({ body, state }) => {
-  let hasFlowComment = false;
-
-  for (let i = 0; i < body.length; i++) {
-    const stmt = body[i];
-    hasFlowComment =
-      hasFlowComment || isFlowComment(stmt.leadingComments || []);
-  }
-
-  return hasFlowComment;
-};
+const statFlowFile = ast => hasFlowComment(ast);
 
 const printStats = stats => {
   const config = {
@@ -53,11 +19,52 @@ const printStats = stats => {
     }
   };
   const tableStats = Object.values(stats).map(stat => {
-    delete stat.condition;
+    if (stat.condition) {
+      delete stat.condition;
+    }
     return Object.values(stat);
   });
   tableStats.unshift(["Title", "Description", "Value", "Files"]);
   return table(tableStats, config);
+};
+
+const printBuckets = buckets => {
+  const tableBuckets = [["#", "Location", "# of @flow files"]];
+  let totalValue = 0;
+  let index = 1;
+  for (const [bucket, value] of buckets) {
+    if (value > 0) {
+      tableBuckets.push([index, bucket, value]);
+      totalValue += value;
+      index += 1;
+    }
+  }
+
+  tableBuckets.push(["##", "Total", totalValue]);
+
+  return table(tableBuckets);
+};
+
+const getBucket = file => {
+  const bucket = file
+    .split("/")
+    .slice(0, 3)
+    .join("/");
+  return bucket;
+};
+
+const getBuckets = files => {
+  const buckets = new Map();
+
+  for (const file of files) {
+    const bucket = getBucket(file);
+
+    if (!buckets.has(bucket)) {
+      buckets.set(bucket, 0);
+    }
+  }
+
+  return buckets;
 };
 
 const getStats = files => {
@@ -67,8 +74,7 @@ const getStats = files => {
       description:
         "Number of Flow files containing @flow comment but no type information",
       value: 0,
-      files: [],
-      condition: statEmptyFlowFile
+      files: []
     },
     flowFiles: {
       title: "@flow files",
@@ -81,37 +87,58 @@ const getStats = files => {
       title: "Parse Errors",
       description: "Number of errors reported when trying to parse a file",
       value: 0,
-      files: [],
-      condition: null
+      files: []
     }
   };
 
+  const buckets = getBuckets(files);
+
   for (const file of files) {
     const inCode = fs.readFileSync(file, "utf-8");
+    const isEmptyFlow = isEmptyFlowFile(inCode);
+
+    if (isEmptyFlow) {
+      stats.emptyFlowFiles.value += 1;
+      stats.emptyFlowFiles.files.push(file);
+      continue;
+    }
+
+    let ast = null;
     try {
-      const ast = parse(inCode, parseOptions);
-      traverse(ast, {
-        Program: {
-          enter(path, state) {
-            Object.keys(stats).forEach(statKey => {
-              const { condition } = stats[statKey];
-              const { body } = path.node;
-              if (body && condition && condition({ body, state })) {
-                stats[statKey].value += 1;
-                stats[statKey].files.push(file);
-              }
-            });
-          }
-        }
-      });
+      ast = parse(inCode, parseOptions);
     } catch (error) {
       stats.parseError.value += 1;
       stats.parseError.files.push(file);
-      console.log(error);
+    }
+
+    if (ast) {
+      const bucket = getBucket(file);
+      const isFlowFile = statFlowFile(ast);
+      const value = buckets.get(bucket);
+      const nextValue = isFlowFile ? value + 1 : value;
+      buckets.set(bucket, nextValue);
+
+      try {
+        Object.keys(stats).forEach(statKey => {
+          const stat = stats[statKey];
+          if (stat.condition && stat.condition(ast)) {
+            stat.value += 1;
+            stat.files.push(file);
+          }
+        });
+      } catch (error) {
+        console.error(error);
+      }
     }
   }
 
-  return printStats(stats);
+  return {
+    stdout: {
+      stats: printStats(stats),
+      buckets: printBuckets(buckets)
+    },
+    stats
+  };
 };
 
 module.exports = getStats;
